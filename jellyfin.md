@@ -1,6 +1,6 @@
-# 🏠 Raspberry Pi Home Media Server Setup with Jellyfin (Hardware Acceleration)
+# 🏠 Raspberry Pi Home Media Server Setup with Jellyfin & qBittorrent (Hardware Acceleration)
 
-This guide shows you how to install and configure **Jellyfin** on a Raspberry Pi, including **hardware acceleration** for smoother media playback and transcoding. Jellyfin is a fully open-source alternative to Plex.
+This guide shows how to set up **Jellyfin** with **hardware acceleration** and integrate **qBittorrent** for automated media downloads on a Raspberry Pi. Your media will be accessible locally via Samba and streamed through Jellyfin.
 
 ---
 
@@ -11,9 +11,9 @@ This guide shows you how to install and configure **Jellyfin** on a Raspberry Pi
 
 2. **Connect via SSH**
    - Open PuTTY.
-   - Enter your Raspberry Pi’s IP address in the **Host Name** field.
+   - Enter your Raspberry Pi’s IP address.
    - Set **Port** to `22` and **Connection type** to `SSH`.
-   - Click **Open** and login with your Raspberry Pi username and password.
+   - Click **Open**, then log in with your Pi's credentials.
 
 ---
 
@@ -39,65 +39,132 @@ sudo systemctl enable jellyfin
 sudo systemctl start jellyfin
 ```
 
-### 4. Access the Jellyfin Web Interface  
-Open a browser and go to:  
+### 4. Access Web Interface  
+Open:  
 `http://<Raspberry_Pi_IP>:8096`
 
 ---
 
-## ⚙️ Enable Hardware Acceleration (Raspberry Pi)
+## ⚙️ Enable Hardware Acceleration
 
 ### 1. Install Required Libraries
 ```bash
-sudo apt install -y     libdrm2     libegl1-mesa     libgbm1     libgl1-mesa-dri     libgles2     mesa-va-drivers     mesa-vdpau-drivers     vainfo     vdpauinfo     intel-media-va-driver-non-free     ffmpeg
+sudo apt install -y     libdrm2     libegl1-mesa     libgbm1     libgl1-mesa-dri     libgles2     mesa-va-drivers     mesa-vdpau-drivers     vainfo     vdpauinfo     ffmpeg
 ```
 
-> **Note:** The `intel-media-va-driver-non-free` package is generally for x86; Raspberry Pi uses `v4l2` (Video for Linux 2) and `ffmpeg` compiled with Raspberry Pi support. Jellyfin can still use VAAPI and V4L2 for decoding.
-
-### 2. Configure Jellyfin to Use Hardware Acceleration
-1. Go to the Jellyfin dashboard.
-2. Navigate to **Playback > Transcoding**.
-3. Enable **Hardware acceleration**.
-4. Select `Video Acceleration API (VAAPI)` or `Video4Linux2 (V4L2)` depending on the availability.
-
-### 3. Add `jellyfin` User to Required Groups
+### 2. Add Jellyfin User to Groups
 ```bash
 sudo usermod -aG video jellyfin
 sudo usermod -aG render jellyfin
-```
-
-Then reboot:
-```bash
 sudo reboot
 ```
 
+### 3. Enable in Jellyfin
+- Go to **Dashboard > Playback > Transcoding**
+- Enable **Hardware acceleration**
+- Select **VAAPI** or **V4L2**
+
 ---
 
-## 📁 Setup Media Library Locations
+## 📂 Create and Configure Media Folders
 
-1. Create media folders:
+1. **Create media directories**
 ```bash
 sudo mkdir -p /home/pi/Media/Movies
 sudo mkdir -p /home/pi/Media/TV
 ```
 
-2. Change ownership:
+2. **Set permissions**
 ```bash
 sudo chown -R jellyfin:jellyfin /home/pi/Media
+sudo chmod -R 755 /home/pi/Media
 ```
-
-3. Add these folders to your Jellyfin library in the web interface.
 
 ---
 
-## 🔁 Optional: Samba Sharing for Local Network
+## 🌐 Install and Configure qBittorrent
+
+### 1. Install qBittorrent-nox
+```bash
+sudo apt install qbittorrent-nox
+```
+
+### 2. Create a qbittorrent user
+```bash
+sudo adduser --system --group qbittorrent
+sudo mkdir /home/qbittorrent
+sudo chown qbittorrent:qbittorrent /home/qbittorrent
+sudo usermod -d /home/qbittorrent qbittorrent
+```
+
+### 3. Run qBittorrent manually (optional for testing)
+```bash
+sudo -u qbittorrent qbittorrent-nox
+```
+
+### 4. Create systemd service
+```bash
+sudo nano /etc/systemd/system/qbittorrent.service
+```
+
+Paste:
+```ini
+[Unit]
+Description=qBittorrent Daemon Service
+After=network.target
+
+[Service]
+User=qbittorrent
+ExecStart=/usr/bin/qbittorrent-nox
+Restart=on-failure
+
+[Install]
+WantedBy=multi-user.target
+```
+
+Enable and start:
+```bash
+sudo systemctl daemon-reload
+sudo systemctl enable qbittorrent
+sudo systemctl start qbittorrent
+```
+
+### 5. Access Web UI  
+Open:  
+`http://<Raspberry_Pi_IP>:8080`  
+Default login:  
+- Username: `admin`  
+- Password: `adminadmin`
+
+---
+
+## 🎬 Download Directly into Jellyfin Library
+
+1. **Configure qBittorrent save path**
+   - Go to: `Tools > Options > Downloads`
+   - Set **Default Save Path** to:
+     ```
+     /home/pi/Media/Movies
+     ```
+
+2. **Ensure folder access**
+```bash
+sudo chown -R jellyfin:qbittorrent /home/pi/Media
+sudo chmod -R 775 /home/pi/Media
+```
+
+> Note: Both `jellyfin` and `qbittorrent` users should be in the same group if needed.
+
+---
+
+## 📁 Optional: Network Share with Samba
 
 1. **Install Samba**
 ```bash
 sudo apt install samba
 ```
 
-2. **Configure Samba**
+2. **Edit Samba config**
 ```bash
 sudo nano /etc/samba/smb.conf
 ```
@@ -114,7 +181,7 @@ public = yes
 writable = yes
 ```
 
-3. **Set Samba password for pi**
+3. **Set Samba password**
 ```bash
 sudo smbpasswd -a pi
 ```
@@ -128,10 +195,11 @@ sudo systemctl restart smbd
 
 ## ✅ Summary
 
-- ✅ **Jellyfin** is installed and running.
-- ✅ **Hardware acceleration** is enabled using VAAPI/V4L2 for better performance.
-- ✅ Media library is accessible from Jellyfin and optionally via local network using Samba.
+- ✅ **Jellyfin** is streaming your library.
+- ✅ **Hardware acceleration** improves playback/transcoding.
+- ✅ **qBittorrent** downloads directly into Jellyfin folders.
+- ✅ **Samba** allows media sharing across devices.
 
 ---
 
-> 💡 Tip: For remote access, consider setting up Jellyfin through a reverse proxy with HTTPS (e.g., using Nginx + Let's Encrypt).
+> 💡 Tip: Use Jellyfin apps for Roku, Android TV, or browsers for easy access.
